@@ -117,7 +117,7 @@ static PyObject* decomp(PyObject *self, PyObject *args)
 }
 
 static PyMethodDef pydkdcmp_methods[] = {
-    {"decomp",  decomp, METH_VARARGS, "Decompresses Drift King '97 images."},
+    {"decomp",  decomp, METH_VARARGS, "decomp(file)\n--\n\nDecompresses Drift King '97 images."},
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };
 
