@@ -1,6 +1,25 @@
 import pydkdcmp
 
-def decomp_file(file):
+def decomp_file(file, strip_header=True):
+    '''
+    Decompresses CHR files
+
+    Parameters
+    ----------
+    file : string
+        CHR file to decompress.
+    strip_header : bool, optional
+        Remove the 6 byte header. The default is True.
+
+    Returns
+    -------
+    None.
+
+    '''
+    skip = 0
+    if strip_header:
+        skip = 6
+    
     file_cntr = 0
     decoded = 0
     
@@ -11,8 +30,8 @@ def decomp_file(file):
         
         decomp, length = pydkdcmp.decomp(comp)
         if length > 0:
-            with open(str(file_cntr).zfill(3)+".bin", "wb") as ofile:
-                ofile.write(decomp)
+            with open(str(file_cntr).zfill(4)+".bin", "wb") as ofile:
+                ofile.write(decomp[skip:])
             decoded += length
         else:
             break
