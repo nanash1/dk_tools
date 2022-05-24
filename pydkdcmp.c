@@ -1,10 +1,6 @@
 /*
  ============================================================================
- Name        : ss_cotton2_lz00.c
  Author      : nanashi
- Version     :
- Copyright   : Your copyright notice
- Description : Hello World in C, Ansi-style
  ============================================================================
  */
 
@@ -16,10 +12,102 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
+/*****************************************************************************
+ * Compression
+ ****************************************************************************/
+
 struct match {
-		Py_ssize_t pos;
-		Py_ssize_t match_len;
+		int pos;
+		int match_len;
 };
+
+static int _find_match(
+		const uint8_t* labuff,
+		int max_len,
+		const uint8_t* sbuff,
+		int sbuff_start,
+		int sbuff_stop,
+		int check_repeats)
+{
+	int match_len = sbuff_stop - sbuff_start;
+	int match;
+
+	/* check if there is a match */
+	for (int i = 0; i < match_len; i++){
+		if (labuff[i] != sbuff[sbuff_start+i]) return 0;
+	}
+	match = match_len;
+	int j = sbuff_start;
+
+	/* check if the found match repeats in the look ahead buffer */
+	if (check_repeats){
+		while (match < max_len){
+			if (labuff[match] == sbuff[j]){
+				match++;
+				j++;
+			} else {
+				break;
+			}
+
+			if (j - sbuff_start > match_len - 1) j = sbuff_start;
+		}
+	}
+
+	return match;
+}
+
+static struct match _find_best_match(const uint8_t* labuff, int labuff_len, const uint8_t* sbuff, int sbuff_len)
+{
+    /* initialize variables */
+    struct match ret;
+    ret.match_len = 0;
+    ret.pos = 0;
+    int pos = 0;
+    int max_match_len = 0;
+    int match_len;
+    int check_repeats;
+
+    /* go through the search buffer and look for matches */
+    while (pos < sbuff_len){
+    	for (int i = 0; i < pos+1; i++){
+    		check_repeats = (pos == i);
+    		match_len = _find_match(labuff, labuff_len, sbuff,
+    				sbuff_len-1-pos, sbuff_len-pos+i, check_repeats);
+
+    		if (match_len > max_match_len){
+    			ret.pos = pos+1;
+    			ret.match_len = match_len,
+				max_match_len = match_len;
+    		} else if (match_len == 0){
+    			break;
+    		}
+    	}
+    	pos++;
+    }
+
+    return ret;
+}
+
+static uint16_t _comp(const uint8_t* p_data, int size, uint8_t* p_comp)
+{
+	int pos = 0;
+	struct match match;
+	const uint8_t* sbuff = p_data;
+	const uint8_t* labuff = p_data;
+
+	while (pos < size){
+		match = _find_best_match(labuff, 0, sbuff, 0);
+
+		if (match.match_len < 3){
+			*p_comp++ = *sbuff++;
+		}
+		pos++;
+	}
+}
+
+/*****************************************************************************
+ * Decompression
+ ****************************************************************************/
 
 static uint16_t _get_szdecomp(const uint8_t* p_comp)
 {
@@ -87,6 +175,37 @@ static uint16_t _decomp(const uint8_t* p_comp, uint8_t* p_decomp)
 	return (uint16_t) (p_src-p_comp);
 }
 
+/*****************************************************************************
+ * Python wrappers
+ ****************************************************************************/
+
+/**
+ * @brief	Compresses Drift King '97 images
+ * @param	self			Python self object
+ * @param	args			Python arguments
+ * @return	PyBytes, int
+ */
+static PyObject* comp(PyObject *self, PyObject *args)
+{
+	/* get arguments from python api */
+
+	const uint8_t* p_data;
+	Py_ssize_t dlength;
+    if (!PyArg_ParseTuple(args, "y#", &p_data, &dlength))
+        return NULL;
+
+    uint8_t* p_comp = (uint8_t *) malloc(1024);
+    if (p_comp == NULL)
+        return PyErr_NoMemory();
+
+    _comp(p_data, dlength, p_comp);
+
+    PyObject* dcomp = PyBytes_FromStringAndSize((char*) p_comp, sizeof(uint8_t)*1024);
+    free(p_comp);
+
+    return Py_BuildValue("Oi", dcomp, 1024);
+}
+
 /**
  * @brief	Decompresses Drift King '97 images
  * @param	self			Python self object
@@ -117,7 +236,8 @@ static PyObject* decomp(PyObject *self, PyObject *args)
 }
 
 static PyMethodDef pydkdcmp_methods[] = {
-    {"decomp",  decomp, METH_VARARGS, "decomp(file)\n--\n\nDecompresses Drift King '97 images."},
+	{"comp",  decomp, METH_VARARGS, "comp(data)\n--\n\nCompresses Drift King '97 images."},
+    {"decomp",  decomp, METH_VARARGS, "decomp(data)\n--\n\nDecompresses Drift King '97 images."},
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };
 
