@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include <math.h>
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
@@ -23,25 +24,24 @@ struct match {
 
 static int _find_match(
 		const uint8_t* labuff,
-		int max_len,
+		int labuff_len,
 		const uint8_t* sbuff,
 		int sbuff_start,
-		int sbuff_stop,
-		int check_repeats)
+		int sbuff_len)
 {
-	int match_len = sbuff_stop - sbuff_start;
 	int match;
+	int i = 0;
 
 	/* check if there is a match */
-	for (int i = 0; i < match_len; i++){
-		if (labuff[i] != sbuff[sbuff_start+i]) return 0;
+	for (i = 0; i < fmin(labuff_len, sbuff_len-sbuff_start); i++){
+		if (labuff[i] != sbuff[sbuff_start+i]) break;
 	}
-	match = match_len;
+	match = i;
 	int j = sbuff_start;
 
 	/* check if the found match repeats in the look ahead buffer */
-	if (check_repeats){
-		while (match < max_len){
+	if ((sbuff_start+i) == sbuff_len){
+		while (match < labuff_len){
 			if (labuff[match] == sbuff[j]){
 				match++;
 				j++;
@@ -49,7 +49,7 @@ static int _find_match(
 				break;
 			}
 
-			if (j - sbuff_start > match_len - 1) j = sbuff_start;
+			if (j == sbuff_len) j = sbuff_start;
 		}
 	}
 
@@ -65,23 +65,21 @@ static struct match _find_best_match(const uint8_t* labuff, int labuff_len, cons
     int pos = 0;
     int max_match_len = 0;
     int match_len;
-    int check_repeats;
 
     /* go through the search buffer and look for matches */
     while (pos < sbuff_len){
-    	for (int i = 0; i < pos+1; i++){
-    		check_repeats = (pos == i);
-    		match_len = _find_match(labuff, labuff_len, sbuff,
-    				sbuff_len-1-pos, sbuff_len-pos+i, check_repeats);
 
-    		if (match_len > max_match_len){
-    			ret.pos = pos+1;
-    			ret.match_len = match_len,
-				max_match_len = match_len;
-    		} else if (match_len == 0){
-    			break;
-    		}
-    	}
+		match_len = _find_match(labuff, labuff_len, sbuff,
+				sbuff_len-1-pos, sbuff_len);
+
+		if (match_len > max_match_len){
+			ret.pos = pos+1;
+			ret.match_len = match_len,
+			max_match_len = match_len;
+		} else if (match_len == 0){
+			break;
+		}
+
     	pos++;
     }
 
@@ -90,19 +88,61 @@ static struct match _find_best_match(const uint8_t* labuff, int labuff_len, cons
 
 static uint16_t _comp(const uint8_t* p_data, int size, uint8_t* p_comp)
 {
-	int pos = 0;
+	uint8_t* p_comp_start = p_comp;
+	uint16_t symbol;
 	struct match match;
 	const uint8_t* sbuff = p_data;
+	uint16_t* p_flags = (uint16_t*) p_comp;
+	p_comp += 2;
+	int sbuff_len = 0;
 	const uint8_t* labuff = p_data;
+	int labuff_len = fmin(size, 34);
+	int flags = 0;
+	int cntr = 0;
+	int test = 100; //TODO Remove
 
-	while (pos < size){
-		match = _find_best_match(labuff, 0, sbuff, 0);
+	while (size){
+
+		if (cntr > 15){
+			cntr = 0;
+			//*p_flags = (uint16_t) flags;
+			p_flags = (uint16_t*) p_comp;
+			p_comp += 2;
+		}
+
+		match = _find_best_match(labuff, labuff_len, sbuff, sbuff_len);
+		flags = (flags << 1) & 0xffff;
 
 		if (match.match_len < 3){
-			*p_comp++ = *sbuff++;
+			//*p_comp++ = *sbuff;
+			sbuff_len++;
+			labuff++;
+			--size;
+			flags |= 0;
+		} else {
+			symbol = (match.pos-1) | ((match.match_len-3) << 11);
+			//*((uint16_t*) p_comp) = symbol;
+			p_comp += 2;
+
+			sbuff_len += match.match_len;
+			labuff += match.match_len;
+			size -= match.match_len;
+			flags |= 1;
 		}
-		pos++;
+
+		labuff_len = fmin(size, 34);
+		if (sbuff_len > 2048){
+			sbuff += (sbuff_len-2048);
+			sbuff_len = 2048;
+		}
+
+		cntr++;
+
+		if (test-- == 0)
+			break;
 	}
+
+	return p_comp - p_comp_start;
 }
 
 /*****************************************************************************
@@ -236,7 +276,7 @@ static PyObject* decomp(PyObject *self, PyObject *args)
 }
 
 static PyMethodDef pydkdcmp_methods[] = {
-	{"comp",  decomp, METH_VARARGS, "comp(data)\n--\n\nCompresses Drift King '97 images."},
+	{"comp",  comp, METH_VARARGS, "comp(data)\n--\n\nCompresses Drift King '97 images."},
     {"decomp",  decomp, METH_VARARGS, "decomp(data)\n--\n\nDecompresses Drift King '97 images."},
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };
