@@ -76,8 +76,10 @@ static struct match _find_best_match(const uint8_t* labuff, int labuff_len, cons
 			ret.pos = pos+1;
 			ret.match_len = match_len,
 			max_match_len = match_len;
-		} else if (match_len == 0){
-			break;
+
+			if (match_len == labuff_len)
+				break;
+
 		}
 
     	pos++;
@@ -94,40 +96,29 @@ static uint16_t _comp(const uint8_t* p_data, int size, uint8_t* p_comp)
 	const uint8_t* sbuff = p_data;
 	uint16_t* p_flags = (uint16_t*) p_comp;
 	p_comp += 2;
-	int sbuff_len = 0;
 	const uint8_t* labuff = p_data;
 	int labuff_len = fmin(size, 34);
-	int flags = 0;
+	int sbuff_len = 0;
 	int cntr = 0;
-	int test = 100; //TODO Remove
+	uint16_t flags = 0;
 
 	while (size){
 
-		if (cntr > 15){
-			cntr = 0;
-			//*p_flags = (uint16_t) flags;
-			p_flags = (uint16_t*) p_comp;
-			p_comp += 2;
-		}
-
 		match = _find_best_match(labuff, labuff_len, sbuff, sbuff_len);
-		flags = (flags << 1) & 0xffff;
 
 		if (match.match_len < 3){
-			//*p_comp++ = *sbuff;
+			*p_comp++ = *labuff++;
 			sbuff_len++;
-			labuff++;
 			--size;
-			flags |= 0;
 		} else {
 			symbol = (match.pos-1) | ((match.match_len-3) << 11);
-			//*((uint16_t*) p_comp) = symbol;
+			*((uint16_t*) p_comp) = symbol;
 			p_comp += 2;
 
 			sbuff_len += match.match_len;
 			labuff += match.match_len;
 			size -= match.match_len;
-			flags |= 1;
+			flags |= 0x8000;
 		}
 
 		labuff_len = fmin(size, 34);
@@ -136,10 +127,20 @@ static uint16_t _comp(const uint8_t* p_data, int size, uint8_t* p_comp)
 			sbuff_len = 2048;
 		}
 
-		cntr++;
+		if (++cntr > 15){
+			cntr = 0;
+			*p_flags = flags;
+			p_flags = (uint16_t*) p_comp;
+			p_comp += 2;
+		}
+		flags = (flags >> 1);
 
-		if (test-- == 0)
-			break;
+	}
+
+	if (cntr == 0){
+		p_comp -= 2;
+	} else {
+		*p_flags = flags >> (15 - cntr);
 	}
 
 	return p_comp - p_comp_start;
@@ -231,19 +232,20 @@ static PyObject* comp(PyObject *self, PyObject *args)
 
 	const uint8_t* p_data;
 	Py_ssize_t dlength;
+	uint16_t comp_len;
     if (!PyArg_ParseTuple(args, "y#", &p_data, &dlength))
         return NULL;
 
-    uint8_t* p_comp = (uint8_t *) malloc(1024);
+    uint8_t* p_comp = (uint8_t *) malloc(fmax(1024, dlength));
     if (p_comp == NULL)
         return PyErr_NoMemory();
 
-    _comp(p_data, dlength, p_comp);
+    comp_len = _comp(p_data, dlength, p_comp);
 
-    PyObject* dcomp = PyBytes_FromStringAndSize((char*) p_comp, sizeof(uint8_t)*1024);
+    PyObject* dcomp = PyBytes_FromStringAndSize((char*) p_comp, sizeof(uint8_t)*(comp_len));
     free(p_comp);
 
-    return Py_BuildValue("Oi", dcomp, 1024);
+    return Py_BuildValue("O", dcomp);
 }
 
 /**
